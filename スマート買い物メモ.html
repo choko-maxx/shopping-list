@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スマート買い物メモ - 買い忘れ防止＆自動補完</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Noto Sans JP -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Inter"', '"Noto Sans JP"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-24">
+
+    <!-- ヘッダー -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="bg-emerald-600 text-white p-2 rounded-xl shadow-sm">
+                    <i data-lucide="shopping-cart" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg text-slate-800 leading-tight">スマート買い物メモ</h1>
+                    <p class="text-xs text-slate-500">自動補完＆リマインドで買い忘れゼロへ</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <!-- 通知許可ボタン -->
+                <button id="notifBtn" onclick="requestNotificationPermission()" class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition">
+                    <i data-lucide="bell" class="w-4 h-4 text-amber-500"></i>
+                    <span id="notifBtnText">通知設定</span>
+                </button>
+                <!-- 定番辞書管理モーダルボタン -->
+                <button onclick="openMasterModal()" class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition">
+                    <i data-lucide="book-open" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">定番リスト辞書</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 pt-4 space-y-5">
+
+        <!-- 買い忘れ・期日アラートバナー（該当がある場合のみ表示） -->
+        <div id="alertBanner" class="hidden bg-rose-50 border border-rose-200 rounded-2xl p-4 shadow-sm animate-fade-in">
+            <div class="flex items-start gap-3">
+                <div class="bg-rose-100 text-rose-600 p-2 rounded-xl shrink-0 mt-0.5">
+                    <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+                </div>
+                <div class="flex-1">
+                    <h2 class="text-sm font-bold text-rose-800" id="alertTitle">買い忘れ注意！期日が迫っている品物があります</h2>
+                    <ul id="alertList" class="mt-1.5 text-xs text-rose-700 space-y-1 list-disc list-inside">
+                        <!-- 動的に挿入 -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新規登録フォームカード -->
+        <section class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                    <i data-lucide="plus-circle" class="w-4 h-4 text-emerald-600"></i>
+                    買うものを登録
+                </h2>
+                <span id="autoFillBadge" class="hidden text-xs bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+                    <i data-lucide="sparkles" class="w-3 h-3"></i>
+                    定番データから自動入力しました
+                </span>
+            </div>
+
+            <form id="addForm" class="space-y-3">
+                <!-- 品名入力（datalistによる候補表示＋自動補完） -->
+                <div class="relative">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">品名 <span class="text-rose-500">*</span> <span class="text-[11px] text-slate-400">（過去に登録した品名を入れると他項目が自動反映されます）</span></label>
+                    <div class="relative">
+                        <input type="text" id="itemName" list="masterSuggestions" required placeholder="例：牛乳、トイレットペーパー、連絡帳..." autocomplete="off"
+                            class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition">
+                        <datalist id="masterSuggestions"></datalist>
+                    </div>
+                    <!-- クイック定番チップ（よく買うものワンタップ入力） -->
+                    <div id="quickChips" class="flex flex-wrap gap-1.5 mt-2">
+                        <!-- JSでよく使う品目をチップ表示 -->
+                    </div>
+                </div>
+
+                <!-- 種類・誰用・買うお店 -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">種類（カテゴリー）</label>
+                        <select id="itemCategory" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white">
+                            <option value="食料品">🍎 食料品</option>
+                            <option value="日用品">🧻 日用品</option>
+                            <option value="子供・学校">🎒 子供・学校</option>
+                            <option value="衣類・雑貨">👕 衣類・雑貨</option>
+                            <option value="医療・薬">💊 医療・薬</option>
+                            <option value="その他">📦 その他</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">誰用</label>
+                        <input type="text" id="itemFor" list="forSuggestions" placeholder="例：家族、自分、長男..." value="家族"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white">
+                        <datalist id="forSuggestions">
+                            <option value="家族">
+                            <option value="自分">
+                            <option value="夫・妻">
+                            <option value="子供">
+                        </datalist>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">買うお店</label>
+                        <input type="text" id="itemStore" list="storeSuggestions" placeholder="例：スーパー、ドラッグストア..." value="スーパー"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white">
+                        <datalist id="storeSuggestions">
+                            <option value="スーパー">
+                            <option value="ドラッグストア">
+                            <option value="100円ショップ">
+                            <option value="ネット通販">
+                            <option value="コンビニ">
+                            <option value="ホームセンター">
+                        </datalist>
+                    </div>
+                </div>
+
+                <!-- 期日と登録ボタン -->
+                <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pt-1">
+                    <div class="flex-1">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">購入期日（リマインド対象）</label>
+                        <div class="flex items-center gap-2">
+                            <input type="date" id="itemDueDate" class="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white">
+                            <button type="button" onclick="setQuickDate(0)" class="px-2.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition">今日</button>
+                            <button type="button" onclick="setQuickDate(1)" class="px-2.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition">明日</button>
+                            <button type="button" onclick="setQuickDate(3)" class="px-2.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition">3日後</button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" id="saveToMaster" checked class="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4">
+                            <span>定番として記憶</span>
+                        </label>
+                        <button type="submit" class="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-sm transition flex items-center justify-center gap-1.5">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                            リストに追加
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- フィルター＆表示切り替えバー -->
+        <section class="space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <!-- お店別タブ -->
+                <div id="storeFilterTabs" class="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+                    <!-- JSで動的生成 -->
+                </div>
+
+                <!-- 完了済み表示トグル -->
+                <div class="flex items-center gap-2 ml-auto">
+                    <button id="toggleCompletedBtn" onclick="toggleShowCompleted()" class="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition flex items-center gap-1">
+                        <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                        <span id="toggleCompletedText">「済」を表示</span>
+                    </button>
+                    <button id="clearCompletedBtn" onclick="clearCompletedItems()" class="hidden text-xs px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 transition">
+                        「済」を一括削除
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 買い物リスト本体 -->
+        <section id="shoppingListContainer" class="space-y-2.5">
+            <!-- JSでリストアイテムを描画 -->
+        </section>
+
+        <!-- 空の状態メッセージ -->
+        <div id="emptyState" class="hidden text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
+            <div class="bg-slate-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
+                <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+            </div>
+            <p class="text-sm font-bold text-slate-600">買うものはありません！</p>
+            <p class="text-xs text-slate-400 mt-1">上のフォームから必要なものを追加してください。</p>
+        </div>
+
+    </main>
+
+    <!-- 定番リスト辞書モーダル -->
+    <div id="masterModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+            <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <div>
+                    <h3 class="font-bold text-slate-800 flex items-center gap-1.5">
+                        <i data-lucide="book-open" class="w-4 h-4 text-indigo-600"></i>
+                        定番リスト辞書（自動入力データ）
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-0.5">登録時に品名が一致すると、以下の設定が自動反映されます</p>
+                </div>
+                <button onclick="closeMasterModal()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <div id="masterListBody" class="p-4 overflow-y-auto space-y-2 flex-1">
+                <!-- 定番アイテム一覧 -->
+            </div>
+
+            <div class="p-3 border-t border-slate-200 bg-slate-50 flex justify-between items-center">
+                <button onclick="resetDefaultMaster()" class="text-xs text-slate-500 hover:text-slate-700 underline">初期サンプルを復元</button>
+                <button onclick="closeMasterModal()" class="px-4 py-2 bg-slate-800 text-white text-xs font-bold rounded-xl">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- トースト通知用コンテナ -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <script>
+        // ==========================================
+        // データ管理＆初期データ設定
+        // ==========================================
+        const STORAGE_KEY_ITEMS = 'smart_shopping_items_v1';
+        const STORAGE_KEY_MASTER = 'smart_shopping_master_v1';
+
+        // 初期の定番辞書データ（ユーザーがすぐに自動入力を体験できるように用意）
+        const DEFAULT_MASTER_DATA = {
+            '牛乳': { category: '食料品', forWhom: '家族', store: 'スーパー' },
+            '卵': { category: '食料品', forWhom: '家族', store: 'スーパー' },
+            '食パン': { category: '食料品', forWhom: '家族', store: 'スーパー' },
+            'トイレットペーパー': { category: '日用品', forWhom: '家族', store: 'ドラッグストア' },
+            'ティッシュペーパー': { category: '日用品', forWhom: '家族', store: 'ドラッグストア' },
+            '洗剤': { category: '日用品', forWhom: '家族', store: 'ドラッグストア' },
+            'ノート': { category: '子供・学校', forWhom: '子供', store: '100円ショップ' },
+            '歯ブラシ': { category: '日用品', forWhom: '自分', store: 'ドラッグストア' }
+        };
+
+        let shoppingItems = [];
+        let masterDict = {};
+        let currentStoreFilter = 'ALL';
+        let showCompleted = false;
+        let notifiedItemIds = new Set(); // 重複通知防止用
+
+        // ==========================================
+        // 初期化処理
+        // ==========================================
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            setupEventListeners();
+            updateMasterUI();
+            renderAll();
+            updateNotificationButtonState();
+
+            // 1分ごとに期日チェックとリマインド通知を実行
+            checkReminders(true);
+            setInterval(() => checkReminders(false), 60000);
+        });
+
+        function loadData() {
+            const savedItems = localStorage.getItem(STORAGE_KEY_ITEMS);
+            const savedMaster = localStorage.getItem(STORAGE_KEY_MASTER);
+
+            if (savedItems) {
+                shoppingItems = JSON.parse(savedItems);
+            } else {
+                // 初回起動時のサンプルデータ（買い忘れ防止アラートがすぐ分かるように設定）
+                const todayStr = getOffsetDateString(0);
+                const tomorrowStr = getOffsetDateString(1);
+                shoppingItems = [
+                    {
+                        id: 'sample-1',
+                        name: '牛乳',
+                        category: '食料品',
+                        forWhom: '家族',
+                        store: 'スーパー',
+                        dueDate: todayStr,
+                        completed: false,
+                        createdAt: Date.now()
+                    },
+                    {
+                        id: 'sample-2',
+                        name: 'トイレットペーパー',
+                        category: '日用品',
+                        forWhom: '家族',
+                        store: 'ドラッグストア',
+                        dueDate: tomorrowStr,
+                        completed: false,
+                        createdAt: Date.now() - 1000
+                    }
+                ];
+                saveItems();
+            }
+
+            if (savedMaster) {
+                masterDict = JSON.parse(savedMaster);
+            } else {
+                masterDict = { ...DEFAULT_MASTER_DATA };
+                saveMaster();
+            }
+        }
+
+        function saveItems() {
+            localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(shoppingItems));
+        }
+
+        function saveMaster() {
+            localStorage.setItem(STORAGE_KEY_MASTER, JSON.stringify(masterDict));
+        }
+
+        // ==========================================
+        // イベントリスナー＆自動反映ロジック
+        // ==========================================
+        function setupEventListeners() {
+            const itemNameInput = document.getElementById('itemName');
+            
+            // 品名入力時のリアルタイム自動補完チェック
+            itemNameInput.addEventListener('input', (e) => {
+                const val = e.target.value.trim();
+                applyAutoFillIfMatch(val);
+            });
+
+            // フォーム送信
+            document.getElementById('addForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                addItem();
+            });
+        }
+
+        // 品名が定番辞書と一致したら「種類・誰用・お店」を自動反映
+        function applyAutoFillIfMatch(name) {
+            const badge = document.getElementById('autoFillBadge');
+            if (masterDict[name]) {
+                const info = masterDict[name];
+                document.getElementById('itemCategory').value = info.category || '食料品';
+                document.getElementById('itemFor').value = info.forWhom || '家族';
+                document.getElementById('itemStore').value = info.store || 'スーパー';
+                
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        // クイック定番チップをタップした時の処理
+        function selectQuickItem(name) {
+            const input = document.getElementById('itemName');
+            input.value = name;
+            applyAutoFillIfMatch(name);
+            input.focus();
+            showToast(`「${name}」の定番設定を自動反映しました`);
+        }
+
+        // クイック日付設定（今日・明日・3日後）
+        function setQuickDate(daysOffset) {
+            document.getElementById('itemDueDate').value = getOffsetDateString(daysOffset);
+        }
+
+        function getOffsetDateString(daysOffset) {
+            const d = new Date();
+            d.setDate(d.getDate() + daysOffset);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        // ==========================================
+        // アイテムの追加・完了・削除操作
+        // ==========================================
+        function addItem() {
+            const nameInput = document.getElementById('itemName');
+            const name = nameInput.value.trim();
+            if (!name) return;
+
+            const category = document.getElementById('itemCategory').value;
+            const forWhom = document.getElementById('itemFor').value.trim() || '家族';
+            const store = document.getElementById('itemStore').value.trim() || '指定なし';
+            const dueDate = document.getElementById('itemDueDate').value;
+            const saveToMasterFlag = document.getElementById('saveToMaster').checked;
+
+            const newItem = {
+                id: 'item-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+                name,
+                category,
+                forWhom,
+                store,
+                dueDate,
+                completed: false,
+                createdAt: Date.now()
+            };
+
+            shoppingItems.unshift(newItem);
+            saveItems();
+
+            // 定番辞書へ記憶・更新
+            if (saveToMasterFlag) {
+                masterDict[name] = { category, forWhom, store };
+                saveMaster();
+                updateMasterUI();
+            }
+
+            // フォームリセット（お店と誰用は連続入力しやすいよう残すか、品名だけクリア）
+            nameInput.value = '';
+            document.getElementById('autoFillBadge').classList.add('hidden');
+            
+            renderAll();
+            checkReminders(false);
+            showToast(`「${name}」をリストに追加しました`);
+        }
+
+        // 買い物かごに入れた（「済」にする / 戻す）
+        function toggleItemComplete(id) {
+            const item = shoppingItems.find(i => i.id === id);
+            if (!item) return;
+
+            item.completed = !item.completed;
+            saveItems();
+            renderAll();
+
+            if (item.completed) {
+                showToast(`「${item.name}」を【済】にしました！`);
+            }
+        }
+
+        function deleteItem(id) {
+            shoppingItems = shoppingItems.filter(i => i.id !== id);
+            saveItems();
+            renderAll();
+            showToast('アイテムを削除しました');
+        }
+
+        function toggleShowCompleted() {
+            showCompleted = !showCompleted;
+            renderAll();
+        }
+
+        function clearCompletedItems() {
+            shoppingItems = shoppingItems.filter(i => !i.completed);
+            saveItems();
+            renderAll();
+            showToast('「済」のアイテムをすべて削除しました');
+        }
+
+        function setStoreFilter(store) {
+            currentStoreFilter = store;
+            renderAll();
+        }
+
+        // ==========================================
+        // 画面描画（リスト・フィルター・アラート）
+        // ==========================================
+        function renderAll() {
+            renderAlertBanner();
+            renderStoreTabs();
+            renderShoppingList();
+            updateCompletedControls();
+            lucide.createIcons();
+        }
+
+        // 期日が迫っている・過ぎているアイテムの判定
+        function getUrgentItems() {
+            const todayStr = getOffsetDateString(0);
+            const tomorrowStr = getOffsetDateString(1);
+
+            return shoppingItems.filter(item => {
+                if (item.completed || !item.dueDate) return false;
+                return item.dueDate <= tomorrowStr;
+            }).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+        }
+
+        // 画面上部の買い忘れ警告バナー描画
+        function renderAlertBanner() {
+            const urgentItems = getUrgentItems();
+            const banner = document.getElementById('alertBanner');
+            const listEl = document.getElementById('alertList');
+
+            if (urgentItems.length === 0) {
+                banner.classList.add('hidden');
+                return;
+            }
+
+            const todayStr = getOffsetDateString(0);
+            banner.classList.remove('hidden');
+            listEl.innerHTML = urgentItems.map(item => {
+                let statusLabel = '';
+                if (item.dueDate < todayStr) {
+                    statusLabel = `<span class="font-bold text-rose-700 bg-rose-200/70 px-1.5 py-0.5 rounded">期限切れ (${formatDateJp(item.dueDate)})</span>`;
+                } else if (item.dueDate === todayStr) {
+                    statusLabel = `<span class="font-bold text-rose-700 bg-rose-200/70 px-1.5 py-0.5 rounded">今日まで！</span>`;
+                } else {
+                    statusLabel = `<span class="font-bold text-amber-800 bg-amber-200/70 px-1.5 py-0.5 rounded">明日まで</span>`;
+                }
+                return `<li>${statusLabel} <strong>${escapeHtml(item.name)}</strong>（${escapeHtml(item.store)} / ${escapeHtml(item.forWhom)}用）</li>`;
+            }).join('');
+        }
+
+        // お店別フィルタータブの描画
+        function renderStoreTabs() {
+            const tabsContainer = document.getElementById('storeFilterTabs');
+            const activeItems = shoppingItems.filter(i => !i.completed);
+            
+            // お店ごとの未購入件数を集計
+            const storeCounts = {};
+            activeItems.forEach(item => {
+                const st = item.store || '指定なし';
+                storeCounts[st] = (storeCounts[st] || 0) + 1;
+            });
+
+            const stores = Object.keys(storeCounts);
+            if (currentStoreFilter !== 'ALL' && !stores.includes(currentStoreFilter)) {
+                currentStoreFilter = 'ALL';
+            }
+
+            let html = `
+                <button onclick="setStoreFilter('ALL')" class="shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentStoreFilter === 'ALL' ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
+                    すべて (${activeItems.length})
+                </button>
+            `;
+
+            stores.forEach(store => {
+                const isSelected = currentStoreFilter === store;
+                html += `
+                    <button onclick="setStoreFilter('${escapeHtml(store)}')" class="shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isSelected ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
+                        <i data-lucide="store" class="w-3 h-3"></i>
+                        ${escapeHtml(store)} (${storeCounts[store]})
+                    </button>
+                `;
+            });
+
+            tabsContainer.innerHTML = html;
+        }
+
+        // 買い物リストアイテムの描画
+        function renderShoppingList() {
+            const container = document.getElementById('shoppingListContainer');
+            const emptyState = document.getElementById('emptyState');
+
+            // フィルタリング
+            let filtered = shoppingItems.filter(item => {
+                if (!showCompleted && item.completed) return false;
+                if (currentStoreFilter !== 'ALL' && item.store !== currentStoreFilter) return false;
+                return true;
+            });
+
+            // ソート：未完了が上、期日が近い順
+            filtered.sort((a, b) => {
+                if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+                if (a.dueDate) return -1;
+                if (b.dueDate) return 1;
+                return b.createdAt - a.createdAt;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            const todayStr = getOffsetDateString(0);
+            const tomorrowStr = getOffsetDateString(1);
+
+            container.innerHTML = filtered.map(item => {
+                // 期日バッジのスタイル決定
+                let dueBadgeHtml = '';
+                let cardBorderClass = 'border-slate-200 bg-white';
+
+                if (item.dueDate) {
+                    if (item.completed) {
+                        dueBadgeHtml = `<span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-400">期日: ${formatDateJp(item.dueDate)}</span>`;
+                    } else if (item.dueDate < todayStr) {
+                        dueBadgeHtml = `<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 flex items-center gap-1"><i data-lucide="alert-circle" class="w-3 h-3"></i>期限切れ (${formatDateJp(item.dueDate)})</span>`;
+                        cardBorderClass = 'border-rose-300 bg-rose-50/30';
+                    } else if (item.dueDate === todayStr) {
+                        dueBadgeHtml = `<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i>今日まで</span>`;
+                        cardBorderClass = 'border-rose-200 bg-rose-50/20';
+                    } else if (item.dueDate === tomorrowStr) {
+                        dueBadgeHtml = `<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i>明日まで</span>`;
+                        cardBorderClass = 'border-amber-200 bg-amber-50/20';
+                    } else {
+                        dueBadgeHtml = `<span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">期日: ${formatDateJp(item.dueDate)}</span>`;
+                    }
+                }
+
+                return `
+                    <div class="rounded-2xl border ${cardBorderClass} p-3.5 shadow-sm transition flex items-center justify-between gap-3 ${item.completed ? 'opacity-60 bg-slate-50' : ''}">
+                        <!-- 左側：かごに入れた（「済」）ボタン＆商品情報 -->
+                        <div class="flex items-center gap-3 flex-1 min-w-0">
+                            <button onclick="toggleItemComplete('${item.id}')" class="shrink-0 w-11 h-11 rounded-xl border-2 flex flex-col items-center justify-center transition ${item.completed ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 hover:border-emerald-500 text-slate-400 hover:text-emerald-600 bg-white'}">
+                                <i data-lucide="check" class="w-5 h-5"></i>
+                                <span class="text-[9px] font-bold leading-none mt-0.5">${item.completed ? '済' : 'かごへ'}</span>
+                            </button>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-bold text-base ${item.completed ? 'line-through text-slate-400' : 'text-slate-800'} truncate">
+                                        ${escapeHtml(item.name)}
+                                    </span>
+                                    ${dueBadgeHtml}
+                                </div>
+                                
+                                <div class="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-medium">
+                                        <i data-lucide="store" class="w-3 h-3"></i>
+                                        ${escapeHtml(item.store)}
+                                    </span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-medium">
+                                        <i data-lucide="user" class="w-3 h-3"></i>
+                                        ${escapeHtml(item.forWhom)}
+                                    </span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                        ${escapeHtml(item.category)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右側：削除ボタン -->
+                        <button onclick="deleteItem('${item.id}')" title="削除" class="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition shrink-0">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateCompletedControls() {
+            const completedCount = shoppingItems.filter(i => i.completed).length;
+            const toggleText = document.getElementById('toggleCompletedText');
+            const clearBtn = document.getElementById('clearCompletedBtn');
+
+            toggleText.textContent = showCompleted ? `「済」を隠す (${completedCount})` : `「済」を表示 (${completedCount})`;
+            
+            if (showCompleted && completedCount > 0) {
+                clearBtn.classList.remove('hidden');
+            } else {
+                clearBtn.classList.add('hidden');
+            }
+        }
+
+        // ==========================================
+        // 定番リスト辞書（自動補完）管理機能
+        // ==========================================
+        function updateMasterUI() {
+            const datalist = document.getElementById('masterSuggestions');
+            const quickChips = document.getElementById('quickChips');
+            const keys = Object.keys(masterDict);
+
+            // datalistの更新
+            datalist.innerHTML = keys.map(k => `<option value="${escapeHtml(k)}">`).join('');
+
+            // 上位6件をクイック入力チップとして表示
+            const topKeys = keys.slice(0, 6);
+            if (topKeys.length > 0) {
+                quickChips.innerHTML = `<span class="text-[11px] text-slate-400 self-center mr-1">定番クイック入力:</span>` + 
+                    topKeys.map(k => `
+                        <button type="button" onclick="selectQuickItem('${escapeHtml(k)}')" class="text-xs px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 border border-slate-200 transition">
+                            + ${escapeHtml(k)}
+                        </button>
+                    `).join('');
+            } else {
+                quickChips.innerHTML = '';
+            }
+        }
+
+        function openMasterModal() {
+            renderMasterModalList();
+            document.getElementById('masterModal').classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        function closeMasterModal() {
+            document.getElementById('masterModal').classList.add('hidden');
+        }
+
+        function renderMasterModalList() {
+            const body = document.getElementById('masterListBody');
+            const keys = Object.keys(masterDict);
+
+            if (keys.length === 0) {
+                body.innerHTML = `<p class="text-center text-xs text-slate-400 py-8">記憶されている定番アイテムはありません。</p>`;
+                return;
+            }
+
+            body.innerHTML = keys.map(name => {
+                const info = masterDict[name];
+                return `
+                    <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                        <div>
+                            <div class="font-bold text-sm text-slate-800">${escapeHtml(name)}</div>
+                            <div class="text-xs text-slate-500 mt-0.5 flex gap-2">
+                                <span>お店: <strong>${escapeHtml(info.store)}</strong></span>
+                                <span>誰用: <strong>${escapeHtml(info.forWhom)}</strong></span>
+                                <span>種類: ${escapeHtml(info.category)}</span>
+                            </div>
+                        </div>
+                        <button onclick="deleteMasterItem('${escapeHtml(name)}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function deleteMasterItem(name) {
+            delete masterDict[name];
+            saveMaster();
+            updateMasterUI();
+            renderMasterModalList();
+            lucide.createIcons();
+            showToast(`「${name}」を定番辞書から削除しました`);
+        }
+
+        function resetDefaultMaster() {
+            masterDict = { ...DEFAULT_MASTER_DATA, ...masterDict };
+            saveMaster();
+            updateMasterUI();
+            renderMasterModalList();
+            lucide.createIcons();
+            showToast('初期サンプルデータを復元しました');
+        }
+
+        // ==========================================
+        // リマインド通知機能（Web Notification API）
+        // ==========================================
+        function updateNotificationButtonState() {
+            const btnText = document.getElementById('notifBtnText');
+            const btn = document.getElementById('notifBtn');
+
+            if (!('Notification' in window)) {
+                btnText.textContent = '通知非対応';
+                return;
+            }
+
+            if (Notification.permission === 'granted') {
+                btnText.textContent = 'リマインドON';
+                btn.classList.remove('bg-slate-50', 'text-slate-700');
+                btn.classList.add('bg-amber-50', 'text-amber-800', 'border-amber-200');
+            } else if (Notification.permission === 'denied') {
+                btnText.textContent = '通知ブロック中';
+            } else {
+                btnText.textContent = '通知を許可する';
+            }
+        }
+
+        function requestNotificationPermission() {
+            if (!('Notification' in window)) {
+                showToast('お使いのブラウザは通知機能に対応していません');
+                return;
+            }
+
+            if (Notification.permission === 'granted') {
+                // すでに許可されている場合はテスト通知を送信
+                sendBrowserNotification('リマインド通知テスト', '期日が近づいた買い物アイテムをこのようにお知らせします！');
+                return;
+            }
+
+            Notification.requestPermission().then(permission => {
+                updateNotificationButtonState();
+                if (permission === 'granted') {
+                    showToast('リマインド通知が有効になりました！');
+                    checkReminders(true);
+                } else {
+                    showToast('通知が許可されませんでした。ブラウザの設定をご確認ください。');
+                }
+            });
+        }
+
+        function checkReminders(forceNotify) {
+            const urgentItems = getUrgentItems();
+            if (urgentItems.length === 0) return;
+
+            // まだ通知していないアイテムを抽出
+            const unnotified = urgentItems.filter(item => !notifiedItemIds.has(item.id));
+            if (unnotified.length === 0 && !forceNotify) return;
+
+            const targetItems = forceNotify ? urgentItems : unnotified;
+            targetItems.forEach(item => notifiedItemIds.add(item.id));
+
+            const names = targetItems.map(i => `${i.name}(${i.store})`).join('、');
+            const title = `【買い忘れ防止】期日が迫っている品物が${targetItems.length}件あります`;
+            const body = `対象: ${names}\n買い物かごに入れたら「済」にしてください。`;
+
+            sendBrowserNotification(title, body);
+        }
+
+        function sendBrowserNotification(title, body) {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                try {
+                    new Notification(title, {
+                        body: body,
+                        icon: 'https://cdn-icons-png.flaticon.com/512/3081/3081840.png'
+                    });
+                } catch (e) {
+                    console.error('Notification error:', e);
+                }
+            }
+        }
+
+        // ==========================================
+        // ユーティリティ
+        // ==========================================
+        function formatDateJp(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            return `${Number(parts[1])}/${Number(parts[2])}`;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'bg-slate-800 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 transition-all duration-300 transform translate-y-2 opacity-0';
+            toast.innerHTML = `<i data-lucide="info" class="w-4 h-4 text-emerald-400 shrink-0"></i><span>${escapeHtml(message)}</span>`;
+            
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
